@@ -7,39 +7,27 @@ app = Flask(__name__)
 
 # Dlib의 얼굴 감지기와 눈 감지기 초기화
 face_detector = dlib.get_frontal_face_detector()
+eye_detector = dlib.get_frontal_face_detector()
 landmark_predictor = dlib.shape_predictor("shape_predictor_68_face_landmarks.dat")
 
 # OpenCV 웹캠 비디오 스트림 초기화
 video_capture = cv2.VideoCapture(0)
 
-def detect_eyes(frame):
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    faces = face_detector(gray)
-    
-    if len(faces) == 0:
-        return False
-    
-    face = faces[0]
-    landmarks = landmark_predictor(gray, face)
-    
-    left_eye = np.array([(landmarks.part(36).x, landmarks.part(36).y),
-                         (landmarks.part(37).x, landmarks.part(37).y),
-                         (landmarks.part(38).x, landmarks.part(38).y),
-                         (landmarks.part(39).x, landmarks.part(39).y),
-                         (landmarks.part(40).x, landmarks.part(40).y),
-                         (landmarks.part(41).x, landmarks.part(41).y)], np.int32)
-    
-    right_eye = np.array([(landmarks.part(42).x, landmarks.part(42).y),
-                         (landmarks.part(43).x, landmarks.part(43).y),
-                         (landmarks.part(44).x, landmarks.part(44).y),
-                         (landmarks.part(45).x, landmarks.part(45).y),
-                         (landmarks.part(46).x, landmarks.part(46).y),
-                         (landmarks.part(47).x, landmarks.part(47).y)], np.int32)
-    
-    cv2.polylines(frame, [left_eye], True, (0, 255, 0), 2)
-    cv2.polylines(frame, [right_eye], True, (0, 255, 0), 2)
-    
-    return True
+def detect_pupil(eye_region_gray, eye_region_color):
+    # 눈동자 추적을 위한 허프 원 검출
+    circles = cv2.HoughCircles(eye_region_gray, cv2.HOUGH_GRADIENT, dp=1, minDist=30,
+                               param1=50, param2=30, minRadius=5, maxRadius=30)
+
+    if circles is not None:
+        circles = np.round(circles[0, :]).astype("int")
+
+        # 가장 크기가 큰 원(눈동자) 선택
+        for (x, y, r) in circles:
+            cv2.circle(eye_region_color, (x, y), r, (0, 255, 0), 4)
+            cv2.rectangle(eye_region_color, (x - 5, y - 5), (x + 5, y + 5), (0, 128, 255), -1)
+            break
+
+    return eye_region_color
 
 def gen_frames():
     while True:
@@ -48,11 +36,40 @@ def gen_frames():
         if not ret:
             break
 
-        has_eyes = detect_eyes(frame)
-        if has_eyes:
-            cv2.putText(frame, 'Eyes Open', (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-        else:
-            cv2.putText(frame, 'Eyes Closed', (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+        # 얼굴 감지
+        faces = face_detector(gray)
+
+        for face in faces:
+            landmarks = landmark_predictor(gray, face)
+            left_eye_region = np.array([(landmarks.part(36).x, landmarks.part(36).y),
+                                        (landmarks.part(37).x, landmarks.part(37).y),
+                                        (landmarks.part(38).x, landmarks.part(38).y),
+                                        (landmarks.part(39).x, landmarks.part(39).y),
+                                        (landmarks.part(40).x, landmarks.part(40).y),
+                                        (landmarks.part(41).x, landmarks.part(41).y)], np.int32)
+
+            right_eye_region = np.array([(landmarks.part(42).x, landmarks.part(42).y),
+                                         (landmarks.part(43).x, landmarks.part(43).y),
+                                         (landmarks.part(44).x, landmarks.part(44).y),
+                                         (landmarks.part(45).x, landmarks.part(45).y),
+                                         (landmarks.part(46).x, landmarks.part(46).y),
+                                         (landmarks.part(47).x, landmarks.part(47).y)], np.int32)
+
+            # 눈동자 추적
+            left_eye_gray = gray[left_eye_region[0][1]:left_eye_region[5][1],
+                                 left_eye_region[0][0]:left_eye_region[3][0]]
+            left_eye_color = frame[left_eye_region[0][1]:left_eye_region[5][1],
+                                   left_eye_region[0][0]:left_eye_region[3][0]]
+
+            right_eye_gray = gray[right_eye_region[0][1]:right_eye_region[5][1],
+                                  right_eye_region[0][0]:right_eye_region[3][0]]
+            right_eye_color = frame[right_eye_region[0][1]:right_eye_region[5][1],
+                                    right_eye_region[0][0]:right_eye_region[3][0]]
+
+            detect_pupil(left_eye_gray, left_eye_color)
+            detect_pupil(right_eye_gray, right_eye_color)
 
         ret, buffer = cv2.imencode('.jpg', frame)
         frame = buffer.tobytes()
