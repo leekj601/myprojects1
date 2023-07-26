@@ -1,54 +1,58 @@
-from flask import Flask, render_template, Response, redirect, url_for
 import cv2
-import time
-import webbrowser
+import dlib
+import numpy as np
+from flask import Flask, render_template, Response
 
 app = Flask(__name__)
 
-# Haar Cascade 분류기 로드
-eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml')
+# Dlib의 얼굴 감지기와 눈 감지기 초기화
+face_detector = dlib.get_frontal_face_detector()
+landmark_predictor = dlib.shape_predictor("shape_predictor_68_face_landmarks.dat")
 
-# Time threshold for redirection (in seconds)
-TIME_THRESHOLD = 2  # 눈이 감지되지 않은 상태를 2초로 설정
+# OpenCV 웹캠 비디오 스트림 초기화
+video_capture = cv2.VideoCapture(0)
 
-# Variable to keep track of the time of the last eye detection
-last_eye_detected_time = 0
-
-def is_eye_closed(eyes):
-    if len(eyes) == 0:
-        return True
-    else:
+def detect_eyes(frame):
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    faces = face_detector(gray)
+    
+    if len(faces) == 0:
         return False
+    
+    face = faces[0]
+    landmarks = landmark_predictor(gray, face)
+    
+    left_eye = np.array([(landmarks.part(36).x, landmarks.part(36).y),
+                         (landmarks.part(37).x, landmarks.part(37).y),
+                         (landmarks.part(38).x, landmarks.part(38).y),
+                         (landmarks.part(39).x, landmarks.part(39).y),
+                         (landmarks.part(40).x, landmarks.part(40).y),
+                         (landmarks.part(41).x, landmarks.part(41).y)], np.int32)
+    
+    right_eye = np.array([(landmarks.part(42).x, landmarks.part(42).y),
+                         (landmarks.part(43).x, landmarks.part(43).y),
+                         (landmarks.part(44).x, landmarks.part(44).y),
+                         (landmarks.part(45).x, landmarks.part(45).y),
+                         (landmarks.part(46).x, landmarks.part(46).y),
+                         (landmarks.part(47).x, landmarks.part(47).y)], np.int32)
+    
+    cv2.polylines(frame, [left_eye], True, (0, 255, 0), 2)
+    cv2.polylines(frame, [right_eye], True, (0, 255, 0), 2)
+    
+    return True
 
-def eye_tracking():
-    global last_eye_detected_time
-    cap = cv2.VideoCapture(0)
-
+def gen_frames():
     while True:
-        ret, frame = cap.read()
+        ret, frame = video_capture.read()
+
         if not ret:
             break
 
-        # 그레이스케일로 변환 (Haar Cascade는 흑백 이미지에서 동작)
-        gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-        # 눈 검출
-        eyes = eye_cascade.detectMultiScale(gray_frame, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
-
-        if is_eye_closed(eyes):
-            # If no eyes are detected, check if the threshold time is exceeded
-            current_time = time.time()
-            if current_time - last_eye_detected_time > TIME_THRESHOLD:
-                # Redirect the user to a new page (e.g., 'no_eyes_detected')
-                return redirect('no_eyes_detected')
-
-        # If eyes are detected, update the last_eye_detected_time
+        has_eyes = detect_eyes(frame)
+        if has_eyes:
+            cv2.putText(frame, 'Eyes Open', (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
         else:
-            last_eye_detected_time = time.time()
-
-        for (ex, ey, ew, eh) in eyes:
-            # 눈 주변에 사각형 그리기
-            cv2.rectangle(frame, (ex, ey), (ex + ew, ey + eh), (0, 255, 0), 2)
+            cv2.putText(frame, 'Eyes Closed', (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
         ret, buffer = cv2.imencode('.jpg', frame)
         frame = buffer.tobytes()
@@ -56,22 +60,13 @@ def eye_tracking():
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
-    cap.release()
-    cv2.destroyAllWindows()
-
 @app.route('/')
 def index():
     return render_template('index.html')
 
 @app.route('/video_feed')
 def video_feed():
-    return Response(eye_tracking(), mimetype='multipart/x-mixed-replace; boundary=frame')
-
-@app.route('/no_eyes_detected')
-def no_eyes_detected():
-    # 사용자를 네이버 웹사이트로 리다이렉트합니다.
-    webbrowser.open('https://www.naver.com', new=2)
-    return "Redirecting to Naver..." 
+    return Response(gen_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 if __name__ == '__main__':
     app.run(debug=True)
