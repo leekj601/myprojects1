@@ -5,6 +5,17 @@
 </head>
 <body>
     <h1>Eye Tracking</h1>
-    <img src="{{ url_for('video_feed') }}" width="1280" height="720" style="border:1px solid black;">
+    <img id="videoStream" width="640" height="480" style="border:1px solid black;">
+    <script type="text/javascript">
+        const videoElement = document.getElementById('videoStream');
+
+        function startVideoStream() {
+            const streamUrl = "{{ url_for('video_feed') }}";
+            videoElement.src = streamUrl;
+        }
+
+        // Start video stream when the page loads
+        window.onload = startVideoStream;
+    </script>
 </body>
 </html>
